@@ -3,7 +3,7 @@ const cors = require('cors');
 const app = express();
 const dotenv = require('dotenv');
 const port = process.env.PORT || 3000;
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config()
 
 // middle ware
@@ -29,9 +29,45 @@ async function run() {
         // find pets api
         const petsCollection = client.db('petnest').collection('pets'); //get pets colllection from db
 
-        app.get('/pets', async(req, res)=>{
-            const cursor = petsCollection.find();
-            const result = await cursor.toArray();
+        app.get('/pets', async (req, res) => {
+            const email = req.query.email;
+            let query = {};
+            if (email) {
+                query = {
+                    ownerEmail: email
+                };
+            }
+            const result = await petsCollection.find(query).toArray();
+            res.send(result);
+        })
+
+        // find pet details api
+        app.get('/pets/:id', async(req, res)=>{
+            const id = req.params.id;
+            const query = {_id: new ObjectId(id)}
+            const result = await petsCollection.findOne(query);
+            res.send(result);
+        })
+
+        // add pet api
+        app.post('/pets', async (req, res) => {
+            const petData = req.body;
+
+            const result = await petsCollection.insertOne(petData);
+
+            res.send(result);
+        });
+        // delete pet api
+        app.delete('/pets/:id', async (req, res) => {
+
+            const id = req.params.id;
+
+            const query = {
+                _id: new ObjectId(id)
+            };
+
+            const result = await petsCollection.deleteOne(query);
+
             res.send(result);
         })
 
