@@ -12,7 +12,7 @@ app.use(cors());
 app.use(express.json());
 
 
-const uri = `mongodb+srv://${process.env.VITE_DB_USER}:${process.env.VITE_DB_PASSWORD}@proli.vjehpyn.mongodb.net/?appName=ProLi`;
+const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@proli.vjehpyn.mongodb.net/?appName=ProLi`;
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
     serverApi: {
@@ -49,19 +49,46 @@ async function run() {
             res.send(result);
         })
 
-        // find donations api
-        const donationsCollection = client.db('petnest').collection('donations');
+        // donations collection
+        const donationsCollection = client.db('petnest').collection('donations')
 
-        app.get('/donations', async(req, res)=>{
-            const email = req.query.email;
-            let query = {};
+        // Get all donations
+        app.get('/donations', async (req, res) => {
+            const email = req.query.email
+
+            let query = {}
+
             if (email) {
                 query = {
                     ownerEmail: email
-                };
+                }
             }
-            const result = await donationsCollection.find(query).toArray();
-            res.send(result);
+
+            const result = await donationsCollection.find(query).toArray()
+
+            res.send(result)
+        })
+
+
+        // Get single donation by MongoDB _id
+        app.get('/donations/:id', async (req, res) => {
+            try {
+                const id = req.params.id
+
+                const query = {
+                    _id: new ObjectId(id)
+                }
+
+                const result = await donationsCollection.findOne(query)
+
+                res.send(result)
+            }
+            catch (error) {
+                console.error(error)
+                res.status(500).send({
+                    message: 'Failed to fetch donation'
+                })
+            }
         })
 
         // add pet api
