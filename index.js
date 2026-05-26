@@ -1,134 +1,172 @@
-const express = require('express');
-const cors = require('cors');
-const app = express();
-const dotenv = require('dotenv');
-const port = process.env.PORT || 3000;
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-require('dotenv').config()
+const express = require('express')
+const cors = require('cors')
+const dotenv = require('dotenv')
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb')
+dotenv.config()
 
-// middle ware
-
-app.use(cors());
-app.use(express.json());
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY)
 
 
-const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@proli.vjehpyn.mongodb.net/?appName=ProLi`;
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
+
+const app = express()
+const port = process.env.PORT || 3000
+
+// middleware
+app.use(cors())
+app.use(express.json())
+
+// Mongo URI
+const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@proli.vjehpyn.mongodb.net/?appName=ProLi`
+
 const client = new MongoClient(uri, {
     serverApi: {
         version: ServerApiVersion.v1,
         strict: true,
         deprecationErrors: true,
-    }
-});
+    },
+})
+
 async function run() {
     try {
-        // Connect the client to the server	(optional starting in v4.7)
-        await client.connect();
+        await client.connect()
 
-        // find pets api
-        const petsCollection = client.db('petnest').collection('pets'); 
+        // =========================
+        // COLLECTIONS
+        // =========================
+        const petsCollection = client.db('petnest').collection('pets')
 
+        const donationsCampaigns = client.db('petnest').collection('donationCampaigns')
+
+        const donationsPayments = client
+            .db('petnest')
+            .collection('donationsPayments')
+
+        // =========================
+        // PETS API
+        // =========================
         app.get('/pets', async (req, res) => {
-            const email = req.query.email;
-            let query = {};
-            if (email) {
-                query = {
-                    ownerEmail: email
-                };
-            }
-            const result = await petsCollection.find(query).toArray();
-            res.send(result);
+            const email = req.query.email
+            const query = email ? { ownerEmail: email } : {}
+
+            const result = await petsCollection.find(query).toArray()
+            res.send(result)
         })
 
-        // find pet details api
-        app.get('/pets/:id', async(req, res)=>{
-            const id = req.params.id;
-            const query = {_id: new ObjectId(id)}
-            const result = await petsCollection.findOne(query);
-            res.send(result);
+        app.get('/pets/:id', async (req, res) => {
+            const id = req.params.id
+            const result = await petsCollection.findOne({
+                _id: new ObjectId(id),
+            })
+            res.send(result)
         })
 
-        // donations collection
-        const donationsCollection = client.db('petnest').collection('donations')
+        app.post('/pets', async (req, res) => {
+            const result = await petsCollection.insertOne(req.body)
+            res.send(result)
+        })
 
-        // Get all donations
+        app.delete('/pets/:id', async (req, res) => {
+            const result = await petsCollection.deleteOne({
+                _id: new ObjectId(req.params.id),
+            })
+            res.send(result)
+        })
+
+        // =========================
+        // DONATION CAMPAIGNS API
+        // =========================
         app.get('/donations', async (req, res) => {
             const email = req.query.email
+            const query = email ? { createdByEmail: email } : {}
 
-            let query = {}
+            const result = await donationsCampaigns.find(query).toArray()
+            res.send(result)
+        })
 
-            if (email) {
-                query = {
-                    ownerEmail: email
-                }
+        app.get('/donations/:id', async (req, res) => {
+            try {
+                const result = await donationsCampaigns.findOne({
+                    _id: new ObjectId(req.params.id),
+                })
+
+                res.send(result)
+            } catch (err) {
+                res.status(500).send({ message: 'Campaign fetch failed' })
             }
+        })
 
-            const result = await donationsCollection.find(query).toArray()
+        app.patch('/donations/:id', async (req, res) => {
+            const { amount } = req.body
+
+            const result = await donationsCampaigns.updateOne(
+                { _id: new ObjectId(req.params.id) },
+                {
+                    $inc: {
+                        donatedAmount: amount,
+                    },
+                }
+            )
 
             res.send(result)
         })
 
-
-        // Get single donation by MongoDB _id
-        app.get('/donations/:id', async (req, res) => {
+        // =========================
+        // STRIPE PAYMENT
+        // =========================
+        app.post('/create-payment-intent', async (req, res) => {
             try {
-                const id = req.params.id
+                const { amount } = req.body
 
-                const query = {
-                    _id: new ObjectId(id)
+                if (!amount || amount <= 0) {
+                    return res.status(400).send({ message: 'Invalid amount' })
                 }
 
-                const result = await donationsCollection.findOne(query)
+                const paymentIntent = await stripe.paymentIntents.create({
+                    amount: parseInt(amount * 100),
+                    currency: 'usd',
+                    payment_method_types: ['card'],
+                })
+
+                res.send({
+                    clientSecret: paymentIntent.client_secret,
+                })
+            } catch (error) {
+                res.status(500).send({ message: 'Stripe error' })
+            }
+        })
+
+        // =========================
+        // SAVE DONATION PAYMENT LOG
+        // =========================
+        app.post('/donations-payment', async (req, res) => {
+            try {
+                const payment = req.body
+
+                const result = await donationsPayments.insertOne({
+                    ...payment,
+                    createdAt: new Date(),
+                })
 
                 res.send(result)
-            }
-            catch (error) {
-                console.error(error)
-                res.status(500).send({
-                    message: 'Failed to fetch donation'
-                })
+            } catch (err) {
+                res.status(500).send({ message: 'Payment save failed' })
             }
         })
 
-        // add pet api
-        app.post('/pets', async (req, res) => {
-            const petData = req.body;
-
-            const result = await petsCollection.insertOne(petData);
-
-            res.send(result);
-        });
-        // delete pet api
-        app.delete('/pets/:id', async (req, res) => {
-
-            const id = req.params.id;
-
-            const query = {
-                _id: new ObjectId(id)
-            };
-
-            const result = await petsCollection.deleteOne(query);
-
-            res.send(result);
-        })
-
-        // Send a ping to confirm a successful connection
-        await client.db("admin").command({ ping: 1 });
-        console.log("Pinged your deployment. You successfully connected to MongoDB!");
+        // ping
+        await client.db('admin').command({ ping: 1 })
+        console.log('MongoDB connected')
     } finally {
-        // Ensures that the client will close when you finish/error
-        // await client.close();
+        // keep alive
     }
 }
-run().catch(console.dir);
 
+run().catch(console.dir)
 
 app.get('/', (req, res) => {
-    res.send("Petnest is running")
+    res.send('Petnest running')
 })
 
-app.listen(port, ()=>{
-    console.log(`Petnesyt is running on ${port}`);
-    
+app.listen(port, () => {
+    console.log(`Server running on ${port}`)
 })
