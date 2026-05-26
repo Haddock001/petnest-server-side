@@ -27,7 +27,7 @@ async function run() {
         await client.connect();
 
         // find pets api
-        const petsCollection = client.db('petnest').collection('pets'); //get pets colllection from db
+        const petsCollection = client.db('petnest').collection('pets'); 
 
         app.get('/pets', async (req, res) => {
             const email = req.query.email;
@@ -46,6 +46,21 @@ async function run() {
             const id = req.params.id;
             const query = {_id: new ObjectId(id)}
             const result = await petsCollection.findOne(query);
+            res.send(result);
+        })
+
+        // find donations api
+        const donationsCollection = client.db('petnest').collection('donations');
+
+        app.get('/donations', async(req, res)=>{
+            const email = req.query.email;
+            let query = {};
+            if (email) {
+                query = {
+                    ownerEmail: email
+                };
+            }
+            const result = await donationsCollection.find(query).toArray();
             res.send(result);
         })
 
