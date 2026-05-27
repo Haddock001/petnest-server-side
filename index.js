@@ -34,7 +34,7 @@ async function run() {
         // COLLECTIONS
         // =========================
         const petsCollection = client.db('petnest').collection('pets')
-
+        const adoptionRequestsCollection = client.db('petnest').collection('adoptionRequests')
         const donationsCampaigns = client.db('petnest').collection('donationCampaigns')
 
         const donationsPayments = client
@@ -151,6 +151,103 @@ async function run() {
             } catch (err) {
                 res.status(500).send({ message: 'Payment save failed' })
             }
+        })
+
+        // =========================
+        // ADOPTION REQUEST API
+        // =========================
+
+        app.post('/adoption-requests', async (req, res) => {
+            try {
+
+                const adoptionData = req.body
+
+                // Check pet exists
+                const pet = await petsCollection.findOne({
+                    _id: new ObjectId(adoptionData.petId),
+                })
+
+                // Prevent adopted pet request
+                if (pet.adopted) {
+                    return res.status(400).send({
+                        message: 'Pet already adopted',
+                    })
+                }
+
+                // Prevent duplicate request
+                const alreadyRequested =
+                    await adoptionRequestsCollection.findOne({
+                        petId: adoptionData.petId,
+                        adopterEmail: adoptionData.adopterEmail,
+                    })
+
+                if (alreadyRequested) {
+                    return res.status(400).send({
+                        message: 'You already requested this pet',
+                    })
+                }
+
+                const result = await adoptionRequestsCollection.insertOne({
+                    ...adoptionData,
+                    status: 'Pending',
+                    createdAt: new Date(),
+                })
+
+                res.send(result)
+
+            } catch (error) {
+
+                res.status(500).send({
+                    message: 'Failed to submit adoption request',
+                })
+            }
+        })
+
+        app.get('/adoption-requests', async (req, res) => {
+
+            const email = req.query.email
+
+            const query = {
+                ownerEmail: email,
+            }
+
+            const result = await adoptionRequestsCollection
+                .find(query)
+                .toArray()
+
+            res.send(result)
+        })
+
+        // Accept or Reject Adoption
+        app.patch('/adoption-requests/:id', async (req, res) => {
+
+            const { status, petId } = req.body
+
+            const result = await adoptionRequestsCollection.updateOne(
+                {
+                    _id: new ObjectId(req.params.id),
+                },
+                {
+                    $set: { status },
+                }
+            )
+
+            // If accepted -> mark pet adopted
+            if (status === 'Accepted') {
+
+                await petsCollection.updateOne(
+                    {
+                        _id: new ObjectId(petId),
+                    },
+                    {
+                        $set: {
+                            adopted: true,
+                        },
+                    }
+                )
+            }
+
+            res.send(result)
         })
 
         // ping
