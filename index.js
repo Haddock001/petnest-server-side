@@ -35,11 +35,8 @@ async function run() {
         // =========================
         const petsCollection = client.db('petnest').collection('pets')
         const adoptionRequestsCollection = client.db('petnest').collection('adoptionRequests')
-        const donationsCampaigns = client.db('petnest').collection('donationCampaigns')
-
-        const donationsPayments = client
-            .db('petnest')
-            .collection('donationsPayments')
+        const donationCollection = client.db('petnest').collection('donations')
+        const donationPayments = client.db('petnest').collection('donationsPayments')
 
         // =========================
         // PETS API
@@ -77,15 +74,17 @@ async function run() {
         // =========================
         app.get('/donations', async (req, res) => {
             const email = req.query.email
+
             const query = email ? { createdByEmail: email } : {}
 
-            const result = await donationsCampaigns.find(query).toArray()
+            const result = await donationCollection.find(query).toArray()
+
             res.send(result)
         })
 
         app.get('/donations/:id', async (req, res) => {
             try {
-                const result = await donationsCampaigns.findOne({
+                const result = await donationCollection.findOne({
                     _id: new ObjectId(req.params.id),
                 })
 
@@ -98,7 +97,7 @@ async function run() {
         app.patch('/donations/:id', async (req, res) => {
             const { amount } = req.body
 
-            const result = await donationsCampaigns.updateOne(
+            const result = await donationCollection.updateOne(
                 { _id: new ObjectId(req.params.id) },
                 {
                     $inc: {
@@ -139,18 +138,14 @@ async function run() {
         // SAVE DONATION PAYMENT LOG
         // =========================
         app.post('/donations-payment', async (req, res) => {
-            try {
-                const payment = req.body
+            const payment = req.body
 
-                const result = await donationsPayments.insertOne({
-                    ...payment,
-                    createdAt: new Date(),
-                })
+            const result = await donationPayments.insertOne({
+                ...payment,
+                createdAt: new Date()
+            })
 
-                res.send(result)
-            } catch (err) {
-                res.status(500).send({ message: 'Payment save failed' })
-            }
+            res.send(result)
         })
 
         // =========================
@@ -250,6 +245,68 @@ async function run() {
             res.send(result)
         })
 
+        // Get Personal Campaigns
+        app.get('/my-campaigns', async (req, res) => {
+
+            const email = req.query.email
+
+            const result = await donationsCampaigns
+                .find({
+                    createdByEmail: email,
+                })
+                .toArray()
+
+            res.send(result)
+        })
+
+        // Get campaign donators
+        app.get('/campaign-donators', async (req, res) => {
+            const email = req.query.email
+
+            const result = await donationPayments.find({
+                campaignOwnerEmail: email
+            }).toArray()
+
+            res.send(result)
+        })
+
+        // Pause/Resume campaigns
+
+        app.patch('/donations/pause/:id', async (req, res) => {
+            const result = await donationCollection.updateOne(
+                { _id: new ObjectId(req.params.id) },
+                { $set: { status: 'Paused' } }
+            )
+
+            res.send(result)
+        })
+
+        app.patch('/donations/resume/:id', async (req, res) => {
+            const result = await donationCollection.updateOne(
+                { _id: new ObjectId(req.params.id) },
+                { $set: { status: 'Active' } }
+            )
+
+            res.send(result)
+        })
+
+        // Add Donations
+        app.post('/donations', async (req, res) => {
+            try {
+                const campaign = req.body
+
+                const result = await donationCollection.insertOne({
+                    ...campaign,
+                    donatedAmount: 0,
+                    status: 'Active',
+                    createdAt: new Date()
+                })
+
+                res.send(result)
+            } catch (err) {
+                res.status(500).send({ message: 'Failed to create campaign' })
+            }
+        })
         // ping
         await client.db('admin').command({ ping: 1 })
         console.log('MongoDB connected')
