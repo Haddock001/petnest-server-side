@@ -126,12 +126,11 @@ const client = new MongoClient(uri, {
 });
 
 async function run() {
-    await client.connect();
+    // await client.connect();
 
     const db = client.db("petnest");
 
     const petsCollection = db.collection("pets");
-    const donationCollection = db.collection("donations");
     const donationPayments = db.collection("donationsPayments");
     const adoptionRequestsCollection = db.collection("adoptionRequests");
     const usersCollection = db.collection("users");
@@ -258,6 +257,24 @@ async function run() {
             { $set: { role, updatedAt: new Date() } }
         );
 
+        res.send(result);
+    });
+
+    app.delete("/users/:id", verifyToken, verifyAdmin, async (req, res) => {
+        const id = getObjectId(req.params.id, res);
+        if (!id) return;
+
+        const user = await usersCollection.findOne({ _id: id });
+
+        if (!user) {
+            return res.status(404).send({ message: "User not found" });
+        }
+
+        if (normalizeEmail(user.email) === normalizeEmail(req.user.email)) {
+            return res.status(400).send({ message: "You cannot delete your own admin account" });
+        }
+
+        const result = await usersCollection.deleteOne({ _id: id });
         res.send(result);
     });
 
@@ -477,7 +494,7 @@ async function run() {
             return res.status(404).send({ message: "Adoption request not found" });
         }
 
-        if (request.ownerEmail !== req.user.email) {
+        if (request.ownerEmail !== req.user.email && !(await requesterIsAdmin(req.user.email))) {
             return res.status(403).send({ message: "Forbidden access" });
         }
 
@@ -641,7 +658,52 @@ async function run() {
         res.send(result);
     });
 
-    console.log("MongoDB connected");
+    app.get("/all-adoption-requests", verifyToken, verifyAdmin, async (req, res) => {
+        const result = await adoptionRequestsCollection
+            .find()
+            .sort({ createdAt: -1 })
+            .toArray();
+        res.send(result);
+    });
+
+    app.delete("/adoption-requests/:id", verifyToken, verifyAdmin, async (req, res) => {
+        const id = getObjectId(req.params.id, res);
+        if (!id) return;
+
+        const result = await adoptionRequestsCollection.deleteOne({ _id: id });
+        res.send(result);
+    });
+
+    app.get("/all-donation-payments", verifyToken, verifyAdmin, async (req, res) => {
+        const result = await donationPayments
+            .find()
+            .sort({ createdAt: -1 })
+            .toArray();
+        res.send(result);
+    });
+
+    app.delete("/donation-payments/:id", verifyToken, verifyAdmin, async (req, res) => {
+        const id = getObjectId(req.params.id, res);
+        if (!id) return;
+
+        const payment = await donationPayments.findOne({ _id: id });
+
+        if (!payment) {
+            return res.status(404).send({ message: "Payment record not found" });
+        }
+
+        if (ObjectId.isValid(payment.campaignId)) {
+            await donationCollection.updateOne(
+                { _id: new ObjectId(payment.campaignId) },
+                { $inc: { donatedAmount: -Math.abs(Number(payment.amount) || 0) } }
+            );
+        }
+
+        const result = await donationPayments.deleteOne({ _id: id });
+        res.send(result);
+    });
+
+    // console.log("MongoDB connected");
 }
 
 run().catch(console.dir);
